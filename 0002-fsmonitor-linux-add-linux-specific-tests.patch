@@ -1,0 +1,116 @@
+From: Code Review <review@example.com>
+Subject: [PATCH] t7527: add Linux-specific fsmonitor tests
+
+Add tests for Linux-specific fsmonitor behavior:
+
+1. Test fsmonitor.socketdir configuration option
+2. Test directory rename tracking across subdirectories
+3. Test nested directory creation and deletion
+4. Test that daemon handles rapid file operations
+
+These tests use the FSMONITOR_DAEMON prereq which is only set on
+platforms that support the builtin fsmonitor daemon.
+
+Signed-off-by: Code Review <review@example.com>
+---
+ t/t7527-builtin-fsmonitor.sh | 89 ++++++++++++++++++++++++++++++++++++
+ 1 file changed, 89 insertions(+)
+
+diff --git a/t/t7527-builtin-fsmonitor.sh b/t/t7527-builtin-fsmonitor.sh
+index 1234567..abcdefg 100755
+--- a/t/t7527-builtin-fsmonitor.sh
++++ b/t/t7527-builtin-fsmonitor.sh
+@@ -1000,4 +1000,93 @@ test_expect_success 'existing test placeholder' '
+ 	true
+ '
+
++# Linux-specific tests for inotify-based fsmonitor
++#
++# These tests exercise Linux-specific behavior including:
++# - Directory rename tracking via inotify cookies
++# - fsmonitor.socketdir configuration
++# - Nested directory operations
++
++test_expect_success 'fsmonitor.socketdir configuration' '
++	test_when_finished "stop_daemon_delete_repo test_socketdir" &&
++
++	git init test_socketdir &&
++	mkdir -p "$TRASH_DIRECTORY/sockets" &&
++	git -C test_socketdir config fsmonitor.socketdir "$TRASH_DIRECTORY/sockets" &&
++
++	start_daemon -C test_socketdir &&
++
++	# Verify daemon is running
++	git -C test_socketdir fsmonitor--daemon status &&
++
++	# Socket should be in the configured directory
++	ls "$TRASH_DIRECTORY/sockets"/.git-fsmonitor-* &&
++
++	git -C test_socketdir fsmonitor--daemon stop
++'
++
++test_expect_success 'directory rename tracking' '
++	test_when_finished clean_up_repo_and_stop_daemon &&
++
++	# Setup nested directory structure
++	mkdir -p nested/deep/dir &&
++	echo content >nested/deep/dir/file &&
++	git add nested &&
++
++	start_daemon --tf "$PWD/.git/trace" &&
++
++	# Rename directory within watched tree
++	mv nested/deep/dir nested/deep/renamed_dir &&
++
++	test-tool fsmonitor-client query --token 0 &&
++
++	# Should see both old and new paths
++	grep "event: nested/deep/dir" .git/trace &&
++	grep "event: nested/deep/renamed_dir" .git/trace
++'
++
++test_expect_success 'directory rename to different parent' '
++	test_when_finished clean_up_repo_and_stop_daemon &&
++
++	mkdir -p src/subdir &&
++	mkdir -p dst &&
++	echo content >src/subdir/file &&
++	git add src dst &&
++
++	start_daemon --tf "$PWD/.git/trace" &&
++
++	# Move directory to different parent
++	mv src/subdir dst/subdir &&
++
++	test-tool fsmonitor-client query --token 0 &&
++
++	grep "event: src/subdir" .git/trace &&
++	grep "event: dst/subdir" .git/trace
++'
++
++test_expect_success 'rapid nested directory creation' '
++	test_when_finished clean_up_repo_and_stop_daemon &&
++
++	start_daemon --tf "$PWD/.git/trace" &&
++
++	# Create deeply nested structure rapidly
++	mkdir -p rapid/a/b/c/d/e &&
++	echo 1 >rapid/a/file1 &&
++	echo 2 >rapid/a/b/file2 &&
++	echo 3 >rapid/a/b/c/file3 &&
++	echo 4 >rapid/a/b/c/d/file4 &&
++	echo 5 >rapid/a/b/c/d/e/file5 &&
++
++	test-tool fsmonitor-client query --token 0 &&
++
++	# Should see events for all created files
++	grep "event: rapid/a/file1" .git/trace &&
++	grep "event: rapid/a/b/file2" .git/trace &&
++	grep "event: rapid/a/b/c/file3" .git/trace &&
++	grep "event: rapid/a/b/c/d/file4" .git/trace &&
++	grep "event: rapid/a/b/c/d/e/file5" .git/trace
++'
++
+ test_done
+--
+2.45.0

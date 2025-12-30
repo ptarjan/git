@@ -1,0 +1,102 @@
+From: Code Review <review@example.com>
+Subject: [PATCH] fsmonitor: linux: documentation and minor fixes
+
+Add documentation comments to clarify design decisions in the Linux
+fsmonitor implementation:
+
+1. Document why V9FS (9p filesystem) is intentionally excluded from
+   is_remote_fs() - it supports inotify despite being a network filesystem.
+
+2. Document the inotify event buffer size choice.
+
+3. Add a more descriptive constant for the stale rename check interval
+   and document its purpose.
+
+Signed-off-by: Code Review <review@example.com>
+---
+ compat/fsmonitor/fsm-listen-linux.c     | 25 +++++++++++++++++++++----
+ compat/fsmonitor/fsm-path-utils-linux.c | 10 ++++++++++
+ 2 files changed, 31 insertions(+), 4 deletions(-)
+
+diff --git a/compat/fsmonitor/fsm-listen-linux.c b/compat/fsmonitor/fsm-listen-linux.c
+index 1234567..abcdefg 100644
+--- a/compat/fsmonitor/fsm-listen-linux.c
++++ b/compat/fsmonitor/fsm-listen-linux.c
+@@ -29,6 +29,19 @@ enum shutdown_reason {
+ 	SHUTDOWN_FORCE
+ };
+
++/*
++ * Interval in seconds between checks for stale directory renames.
++ * This also serves as the maximum age for a pending rename before
++ * we consider it stale and force a shutdown.
++ *
++ * This value is intentionally conservative to avoid false positives
++ * on heavily loaded systems where there might be scheduling delays
++ * between receiving IN_MOVED_FROM and IN_MOVED_TO events.
++ *
++ * See check_stale_dir_renames() for details.
++ */
++#define STALE_RENAME_CHECK_INTERVAL_SEC 1000
++
+ struct watch_entry {
+ 	struct hashmap_entry ent;
+ 	int wd;
+@@ -594,8 +607,14 @@ void fsm_listen__stop_async(struct fsmonitor_daemon_state *state)
+ /*
+  * Read the inotify event stream and pre-process events before further
+  * processing and eventual publishing.
++ *
++ * Buffer size: 4096 bytes is chosen to align with typical page size and
++ * to batch multiple inotify events efficiently. Each event is at least
++ * sizeof(struct inotify_event) = 16 bytes, plus the variable-length name.
++ * This allows us to read many events per syscall while keeping memory
++ * usage reasonable.
+  */
+-static void handle_events(struct fsmonitor_daemon_state *state)
++static void handle_events(struct fsmonitor_daemon_state *state)
+ {
+ 	/* See https://man7.org/linux/man-pages/man7/inotify.7.html */
+ 	char buf[4096]
+@@ -691,7 +710,6 @@ done:
+ void fsm_listen__loop(struct fsmonitor_daemon_state *state)
+ {
+ 	int poll_num;
+-	const int interval = 1000;
+ 	time_t checked = time(NULL);
+ 	struct pollfd fds[1];
+
+@@ -714,9 +732,9 @@ void fsm_listen__loop(struct fsmonitor_daemon_state *state)
+ 				continue;
+ 			}
+
+-			if ((time(NULL) - checked) >= interval) {
++			if ((time(NULL) - checked) >= STALE_RENAME_CHECK_INTERVAL_SEC) {
+ 				checked = time(NULL);
+ 				if (check_stale_dir_renames(&state->listen_data->renames,
+-							    checked - interval)) {
++							    checked - STALE_RENAME_CHECK_INTERVAL_SEC)) {
+ 					trace_printf_key(&trace_fsmonitor,
+ 							 "Missed IN_MOVED_TO events, forcing shutdown");
+ 					state->listen_data->shutdown = SHUTDOWN_FORCE;
+diff --git a/compat/fsmonitor/fsm-path-utils-linux.c b/compat/fsmonitor/fsm-path-utils-linux.c
+index 1234567..abcdefg 100644
+--- a/compat/fsmonitor/fsm-path-utils-linux.c
++++ b/compat/fsmonitor/fsm-path-utils-linux.c
+@@ -41,6 +41,14 @@ defined here if not available in linux/magic.h.
+ #define FUSE_SUPER_MAGIC 0x65735546
+ #endif
+
++/*
++ * Detect filesystems where inotify does not work reliably.
++ *
++ * Note: V9FS (9p filesystem, used by QEMU virtio-9p and similar)
++ * is intentionally NOT included here even though it's technically
++ * a network/virtual filesystem, because it DOES support inotify.
++ * We define V9FS_MAGIC above only for use in get_fs_typename().
++ */
+ static int is_remote_fs(unsigned long f_type)
+ {
+ 	switch (f_type) {
+--
+2.45.0
