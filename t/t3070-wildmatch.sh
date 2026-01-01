@@ -433,14 +433,16 @@ match 0 1 0 1 'z' '[Z-y]'
 match 1 1 1 1 'Z' '[Z-y]'
 
 test_expect_success 'matching does not exhibit exponential behavior' '
-	{
-		test-tool wildmatch wildmatch \
-			aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab \
-			"*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a" &
-		pid=$!
-	} &&
-	sleep 2 &&
-	! kill $!
+	test-tool wildmatch wildmatch \
+		aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab \
+		"*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a*a" &
+	pid=$! &&
+	test_when_finished "kill $pid 2>/dev/null || :" &&
+	# If wildmatch has exponential behavior, this pattern would take
+	# years to match. Give it 5 seconds (generous for slow CI systems
+	# running ASAN/MSAN) to complete before declaring success.
+	sleep 5 &&
+	! kill -0 $pid 2>/dev/null
 '
 
 test_done
