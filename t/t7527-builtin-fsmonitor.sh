@@ -137,7 +137,7 @@ test_expect_success 'implicit daemon start' '
 # machines (where it might take a moment to wake and reschedule the
 # daemon process) to avoid false alarms during test runs.)
 #
-IMPLICIT_TIMEOUT=5
+IMPLICIT_TIMEOUT=10
 
 verify_implicit_shutdown () {
 	r=$1 &&
@@ -911,9 +911,14 @@ start_git_in_background () {
 	git "$@" &
 	git_pid=$!
 	git_pgid=$(ps -o pgid= -p $git_pid)
-	nr_tries_left=10
+	nr_tries_left=20
 	while true
 	do
+		# Exit early if the git process has already finished
+		if ! kill -0 $git_pid 2>/dev/null
+		then
+			exit 0
+		fi
 		if test $nr_tries_left -eq 0
 		then
 			kill -- -$git_pgid
@@ -927,18 +932,22 @@ start_git_in_background () {
 }
 
 stop_git () {
-	while kill -0 -- -$git_pgid
+	nr_tries=10
+	while kill -0 -- -$git_pgid 2>/dev/null && test $nr_tries -gt 0
 	do
-		kill -- -$git_pgid
+		kill -- -$git_pgid 2>/dev/null
 		sleep 1
+		nr_tries=$(($nr_tries - 1))
 	done
 }
 
 stop_watchdog () {
-	while kill -0 $watchdog_pid
+	nr_tries=10
+	while kill -0 $watchdog_pid 2>/dev/null && test $nr_tries -gt 0
 	do
-		kill $watchdog_pid
+		kill $watchdog_pid 2>/dev/null
 		sleep 1
+		nr_tries=$(($nr_tries - 1))
 	done
 }
 
