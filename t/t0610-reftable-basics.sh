@@ -452,7 +452,9 @@ test_expect_success 'ref transaction: retry acquiring tables.list lock' '
 		{
 			( sleep 1 && rm -f $LOCK ) &
 		} &&
-		git -c reftable.lockTimeout=5000 update-ref refs/heads/branch HEAD
+		# Use a generous timeout to handle slow CI systems (especially
+		# with ASAN/MSAN builds where operations are significantly slower)
+		git -c reftable.lockTimeout=10000 update-ref refs/heads/branch HEAD
 	)
 '
 
