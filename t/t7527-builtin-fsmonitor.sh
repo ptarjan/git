@@ -67,6 +67,16 @@ then
 	test_done
 fi
 
+# Debug: log test case start/finish to original stderr (fd 7) so that
+# meson's --print-errorlogs shows which test case is running when a
+# timeout occurs.
+start_test_case_output () {
+	echo ">>> test $test_count: $1" >&7
+}
+finalize_test_case_output () {
+	echo "<<< test $test_count: $1" >&7
+}
+
 stop_daemon_delete_repo () {
 	r=$1 &&
 	test_might_fail maybe_timeout 30 \
